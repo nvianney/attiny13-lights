@@ -21,9 +21,9 @@ struct Lights {
 } lights;
 
 void setupLights(struct Lights &lights) {
-    lights.green = 0xF0;
+    lights.green = 0xFF;
     lights.red = 0x00;
-    lights.blue = 0x00;
+    lights.blue = 0x0F;
 
     pinMode(LIGHT_PIN, OUTPUT);
 }
@@ -32,7 +32,7 @@ void writeLights(struct Lights &lights) {
     const uint8_t mask = digitalPinToBitMask(LIGHT_PIN);
     volatile uint8_t hi = PORTB | mask;
     volatile uint8_t lo = PORTB & (~mask);
-    const uint32_t data = ((uint32_t) lights.blue << 24) | ((uint32_t) lights.red << 16) | ((uint32_t) lights.green << 8);
+    const uint32_t data = ((uint32_t) lights.blue << 16) | ((uint32_t) lights.red << 8) | ((uint32_t) lights.green); // AVR is little-endian
     volatile uint8_t *start = ((uint8_t*) &data);
     volatile uint8_t byte = *start;
     volatile uint8_t temp = (data & 0x80) ? hi : lo;
