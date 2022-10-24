@@ -206,18 +206,20 @@ void updateButton(struct State &state) {
         digitalWrite(3, LOW);
         if (pressed) {
             state.buttonState = BTN_JUST_PRESSED;
-            state.buttonTicks = 0;
         }
     } else if (state.buttonState == BTN_JUST_PRESSED) {
         state.buttonState = BTN_PRESSED;
+        state.buttonTicks = 0;
     } else if (state.buttonState == BTN_PRESSED) {
         state.buttonTicks++;
         if (state.buttonTicks >= BTN_LONG_TICKS) {
-            state.buttonState = BTN_LONG_PRESSED;
+            state.buttonState = BTN_JUST_LONG_PRESSED;
         }
         if (!pressed) {
             state.buttonState = BTN_RELEASED;
         }
+    } else if (state.buttonState == BTN_JUST_LONG_PRESSED) {
+        state.buttonState = BTN_LONG_PRESSED;
     } else if (state.buttonState == BTN_LONG_PRESSED) {
         digitalWrite(3, HIGH);
         if (!pressed) {
@@ -236,7 +238,7 @@ inline void set(uint8_t *colors, uint8_t r, uint8_t g, uint8_t b) {
 
 void updateLights(struct State &state, struct Lights &lights) {
     bool dirty = false;
-    if (state.buttonState == BTN_LONG_PRESSED) {
+    if (state.buttonState == BTN_JUST_LONG_PRESSED) {
         state.colorState = (state.colorState + 1) % COLORS;
         dirty = true;
         
