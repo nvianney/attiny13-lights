@@ -55,6 +55,12 @@
 #define CLR_R_3_0 0xFF, 0x20, 0x20
 #define CLR_R_3_1 0xFF, 0x20, 0x20
 
+// using this macro still results in the same no. of bytes used.
+//#define SET_COLOR(ptr, r, g, b) \
+//    *(ptr) = r; \
+//    *(ptr + 1) = g; \
+//    *(ptr + 2) = b;
+
 #include <avr/sleep.h>
 
 struct Lights {
@@ -227,7 +233,7 @@ void updateButton(struct State &state) {
         if (!pressed) {
             state.buttonState = BTN_LONG_RELEASED;
         }
-    } else if (state.buttonState == BTN_RELEASED || state.buttonState == BTN_LONG_RELEASED) {
+    } else /*if (state.buttonState == BTN_RELEASED || state.buttonState == BTN_LONG_RELEASED)*/ {
         state.buttonState = BTN_IDLE;
     }
 }
