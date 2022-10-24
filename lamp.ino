@@ -1,8 +1,12 @@
-#define LED_PIN 2
+#define LED_MOSFET_PIN PB0
+#define BTN_PIN PB1
+#define LED_PIN PB2
+
+#define BTN_INTERRUPT PCINT1
+
 #define LED_PATTERN_SIZE 2
 #define LED_COUNT 4
 
-#define BTN_PIN 1
 #define BTN_IDLE 0
 #define BTN_JUST_PRESSED 1
 #define BTN_PRESSED 2
@@ -14,9 +18,6 @@
 
 #define STATES 4
 #define COLORS 2
-
-#define CLR_BLUE 0
-#define CLR_RED 1
 
 // 0.125 us +- 0.15
 // 0.25
@@ -32,6 +33,8 @@
 // T1H 0.8us
 // T1L 0.45us
 
+#define CLR_BLUE 0
+#define CLR_RED 1
 // COLOR_STATE_INDEX
 #define CLR_B_0_0 0x00, 0x00, 0x00
 #define CLR_B_0_1 0x00, 0x00, 0x00
@@ -51,6 +54,8 @@
 #define CLR_R_2_1 0x7F, 0x10, 0x10
 #define CLR_R_3_0 0xFF, 0x20, 0x20
 #define CLR_R_3_1 0xFF, 0x20, 0x20
+
+#include <avr/sleep.h>
 
 struct Lights {
     uint8_t colors[3 * LED_PATTERN_SIZE];
@@ -73,7 +78,7 @@ struct State {
 } state;
 
 void writeLights(struct Lights &lights) {
-    const uint8_t mask = digitalPinToBitMask(LED_PIN);
+    const uint8_t mask = 1 << PB2;
     volatile uint8_t hi = PORTB | mask;
     volatile uint8_t lo = PORTB & (~mask);
     volatile uint8_t *start = ((uint8_t*) lights.colors);
@@ -195,15 +200,13 @@ void writeLights(struct Lights &lights) {
           [start] "e" (start),
           [ptr] "e" (start+1)
     );
-    digitalWrite(LED_PIN, LOW);
-    delay(20);
+    _delay_ms(20);
 }
 
 void updateButton(struct State &state) {
-    uint8_t pressed = digitalRead(BTN_PIN) == HIGH;
+    uint8_t pressed = PINB & (1 << PB1);
 
     if (state.buttonState == BTN_IDLE) {
-        digitalWrite(3, LOW);
         if (pressed) {
             state.buttonState = BTN_JUST_PRESSED;
         }
@@ -221,7 +224,6 @@ void updateButton(struct State &state) {
     } else if (state.buttonState == BTN_JUST_LONG_PRESSED) {
         state.buttonState = BTN_LONG_PRESSED;
     } else if (state.buttonState == BTN_LONG_PRESSED) {
-        digitalWrite(3, HIGH);
         if (!pressed) {
             state.buttonState = BTN_LONG_RELEASED;
         }
@@ -236,7 +238,7 @@ inline void set(uint8_t *colors, uint8_t r, uint8_t g, uint8_t b) {
     *(colors+2) = b;
 }
 
-void updateLights(struct State &state, struct Lights &lights) {
+bool updateLights(struct State &state, struct Lights &lights) {
     bool dirty = false;
     if (state.buttonState == BTN_JUST_LONG_PRESSED) {
         state.colorState = (state.colorState + 1) % COLORS;
@@ -284,26 +286,42 @@ void updateLights(struct State &state, struct Lights &lights) {
         }
         writeLights(lights);
     }
+
+    return true;
 }
 
 void setup() {
-    pinMode(LED_PIN, OUTPUT);
-    pinMode(BTN_PIN, INPUT);
-    pinMode(3, OUTPUT);
+    // 1 is output
+    DDRB |= (1 << LED_PIN);
 }
 
-//bool b = false;
+ISR(PCINT0_vect){}
+
+void sleep() {
+    // https://bigdanzblog.wordpress.com/2014/08/10/attiny85-wake-from-sleep-on-pin-state-change-code-example/comment-page-1/
+    GIMSK |= _BV(PCIE);                     // Enable Pin Change Interrupts
+    PCMSK |= _BV(BTN_INTERRUPT);            // Use PB3 as interrupt pin
+    ADCSRA &= ~_BV(ADEN);                   // ADC off
+    set_sleep_mode(SLEEP_MODE_PWR_DOWN);    // replaces above statement
+
+    sleep_enable();                         // Sets the Sleep Enable bit in the MCUCR Register (SE BIT)
+    sei();                                  // Enable interrupts
+    sleep_cpu();                            // sleep
+
+    cli();                                  // Disable interrupts
+    PCMSK &= ~_BV(BTN_INTERRUPT);           // Turn off PB3 as interrupt pin
+    sleep_disable();                        // Clear SE bit
+    ADCSRA |= _BV(ADEN);                    // ADC on
+
+    sei();                                  // Enable interrupts
+}
+
 void loop() {
     updateButton(state);
-    updateLights(state, lights);
-    delay(10);
-//    b = !b;
-//
-//    if (b) {
-//        lights.setColor(0, 0xFF, 0x00, 0x00);
-//        lights.setColor(1, 0x00, 0xFF, 0x00);
-//    } else {
-//        lights.setColor(1, 0xFF, 0x00, 0x00);
-//        lights.setColor(0, 0x00, 0xFF, 0x00);
-//    }
+    bool canSleep = updateLights(state, lights);
+    _delay_ms(10);
+
+    if (state.buttonState == BTN_IDLE && canSleep) {
+        sleep();
+    }
 }
