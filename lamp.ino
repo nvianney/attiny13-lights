@@ -251,6 +251,7 @@ bool updateLights(struct State &state, struct Lights &lights) {
 
     if (dirty) {
         uint8_t colors[3 * LED_PATTERN_SIZE];
+        // to optimize: avoid using set(...).
         if (state.colorState == CLR_BLUE) {
             if (state.lightState == 0) {
                 set(colors, CLR_B_0_0);
