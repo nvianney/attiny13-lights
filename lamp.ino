@@ -1,6 +1,30 @@
 #define LED_PIN 2
 #define LED_PATTERN_SIZE 2
 #define LED_COUNT 4
+
+#define BTN_PIN 1
+#define BTN_IDLE 0
+#define BTN_JUST_PRESSED 1
+#define BTN_PRESSED 2
+#define BTN_LONG_PRESSED 3
+#define BTN_RELEASED 4
+#define BTN_LONG_RELEASED 5
+#define BTN_LONG_TICKS 50
+
+#define STATES 4
+
+// COLOR_STATE_INDEX
+#define CLR_BLUE 0
+#define CLR_PURPLE 1
+#define CLR_RED 2
+#define CLR_B_0_0 0x00, 0x00, 0x00
+#define CLR_B_0_1 0x00, 0x00, 0x00
+#define CLR_B_1_0 0x00, 0x7F, 0x7F
+#define CLR_B_1_1 0x00, 0x00, 0x00
+#define CLR_B_2_0 0x00, 0x7F, 0x7F
+#define CLR_B_2_1 CLR_B_1_0
+#define CLR_B_3_0 0x00, 0xFF, 0xFF
+#define CLR_B_3_1 CLR_B_3_0
 // 0.125 us +- 0.15
 // 0.25
 // 0.375
@@ -28,12 +52,14 @@ struct Lights {
     }
 } lights;
 
-void setupLights(struct Lights &lights) {
-    lights.setColor(0, 0x00, 0xFF, 0x00);
-    lights.setColor(1, 0xFF, 0x00, 0x00);
+struct State {
+    uint8_t color = CLR_BLUE;
+    int8_t lightState = -1;
+    uint8_t buttonState = BTN_PRESSED; // for init
 
-    pinMode(LED_PIN, OUTPUT);
-}
+    uint8_t buttonTicks = 0;
+  
+} state;
 
 void writeLights(struct Lights &lights) {
     const uint8_t mask = digitalPinToBitMask(LED_PIN);
@@ -44,7 +70,7 @@ void writeLights(struct Lights &lights) {
     volatile uint8_t next = (data & 0x80) ? hi : lo;
     volatile uint8_t colorIndex;
     volatile uint8_t colorCount = 0x00;
-    volatile uint8_t ledCount = LED_COUNT;
+    volatile uint8_t ledCount = LED_COUNT / LED_PATTERN_SIZE;
     volatile uint8_t zero = 0;
 
     for (int i = 0; i < LED_PATTERN_SIZE * 3; i++) {
@@ -53,7 +79,6 @@ void writeLights(struct Lights &lights) {
     }
     colorIndex = colorCount;
     
-
     asm volatile(
         "top: \n\t"
         
@@ -63,60 +88,60 @@ void writeLights(struct Lights &lights) {
         "mov %[next], %[lo] \n\t"   // 1    next = LO
         "sbrc %[data], 6 \n\t"      // 1/2  if data & 0x40
         "mov %[next], %[hi] \n\t"   // 1    next = HI
-        "nop \n\t"
-        "out %[port], %[lo] \n\t"
-        "rjmp .+0 \n\t"
-        "nop \n\t"
+        "nop \n\t"                  // 1    nop
+        "out %[port], %[lo] \n\t"   // 1    port = LO
+        "rjmp .+0 \n\t"             // 2    nop nop
+        "nop \n\t"                  // 1    nop
 
         "out %[port], %[hi] \n\t"   // 1    port = HI
         "rjmp .+0 \n\t"             //      nop nop
         "out %[port], %[next] \n\t" // 1    port = next
         "mov %[next], %[lo] \n\t"   // 1    next = LO
-        "sbrc %[data], 5 \n\t"      // 1/2  if data & 0x40
+        "sbrc %[data], 5 \n\t"      // 1/2  if data & 0x20
         "mov %[next], %[hi] \n\t"   // 1    next = HI
-        "nop \n\t"
-        "out %[port], %[lo] \n\t"
-        "rjmp .+0 \n\t"
-        "nop \n\t"
+        "nop \n\t"                  // 1    nop
+        "out %[port], %[lo] \n\t"   // 1    port = LO
+        "rjmp .+0 \n\t"             // 2    nop nop
+        "nop \n\t"                  // 1    nop
 
         "out %[port], %[hi] \n\t"   // 1    port = HI
         "rjmp .+0 \n\t"             //      nop nop
         "out %[port], %[next] \n\t" // 1    port = next
         "mov %[next], %[lo] \n\t"   // 1    next = LO
-        "sbrc %[data], 4 \n\t"      // 1/2  if data & 0x40
+        "sbrc %[data], 4 \n\t"      // 1/2  if data & 0x10
         "mov %[next], %[hi] \n\t"   // 1    next = HI
-        "nop \n\t"
-        "out %[port], %[lo] \n\t"
-        "rjmp .+0 \n\t"
-        "nop \n\t"
+        "nop \n\t"                  // 1    nop
+        "out %[port], %[lo] \n\t"   // 1    port = LO
+        "rjmp .+0 \n\t"             // 2    nop nop
+        "nop \n\t"                  // 1    nop
 
         "out %[port], %[hi] \n\t"   // 1    port = HI
         "rjmp .+0 \n\t"             //      nop nop
         "out %[port], %[next] \n\t" // 1    port = next
         "mov %[next], %[lo] \n\t"   // 1    next = LO
-        "sbrc %[data], 3 \n\t"      // 1/2  if data & 0x40
+        "sbrc %[data], 3 \n\t"      // 1/2  if data & 0x08
         "mov %[next], %[hi] \n\t"   // 1    next = HI
-        "nop \n\t"
-        "out %[port], %[lo] \n\t"
-        "rjmp .+0 \n\t"
-        "nop \n\t"
+        "nop \n\t"                  // 1    nop
+        "out %[port], %[lo] \n\t"   // 1    port = LO
+        "rjmp .+0 \n\t"             // 2    nop nop
+        "nop \n\t"                  // 1    nop
 
         "out %[port], %[hi] \n\t"   // 1    port = HI
         "rjmp .+0 \n\t"             //      nop nop
         "out %[port], %[next] \n\t" // 1    port = next
         "mov %[next], %[lo] \n\t"   // 1    next = LO
-        "sbrc %[data], 2 \n\t"      // 1/2  if data & 0x40
+        "sbrc %[data], 2 \n\t"      // 1/2  if data & 0x04
         "mov %[next], %[hi] \n\t"   // 1    next = HI
-        "nop \n\t"
-        "out %[port], %[lo] \n\t"
-        "rjmp .+0 \n\t"
-        "nop \n\t"
+        "nop \n\t"                  // 1    nop
+        "out %[port], %[lo] \n\t"   // 1    port = LO
+        "rjmp .+0 \n\t"             // 2    nop nop
+        "nop \n\t"                  // 1    nop
 
         "out %[port], %[hi] \n\t"   // 1    port = HI
         "rjmp .+0 \n\t"             // 2    nop nop
         "out %[port], %[next] \n\t" // 1    port = next
         "mov %[next], %[lo] \n\t"   // 1    next = LO
-        "sbrc %[data], 1 \n\t"      // 1/2  if data & 0x40
+        "sbrc %[data], 1 \n\t"      // 1/2  if data & 0x02
         "mov %[next], %[hi] \n\t"   // 1      next = HI
         "nop \n\t"                  // 1    nop
         "out %[port], %[lo] \n\t"   // 1    port = LO
@@ -160,17 +185,90 @@ void writeLights(struct Lights &lights) {
           [ptr] "e" (start+1)
     );
     digitalWrite(LED_PIN, LOW);
+    delay(20);
+}
+
+void updateButton(struct State &state) {
+    uint8_t pressed = digitalRead(BTN_PIN) == HIGH;
+
+    if (state.buttonState == BTN_IDLE) {
+        digitalWrite(3, LOW);
+        if (pressed) {
+            state.buttonState = BTN_JUST_PRESSED;
+            state.buttonTicks = 0;
+        }
+    } else if (state.buttonState == BTN_JUST_PRESSED) {
+        state.buttonState = BTN_PRESSED;
+    } else if (state.buttonState == BTN_PRESSED) {
+        state.buttonTicks++;
+        if (state.buttonTicks >= BTN_LONG_TICKS) {
+            state.buttonState = BTN_LONG_PRESSED;
+        }
+        if (!pressed) {
+            state.buttonState = BTN_RELEASED;
+        }
+    } else if (state.buttonState == BTN_LONG_PRESSED) {
+        digitalWrite(3, HIGH);
+        if (!pressed) {
+            state.buttonState = BTN_LONG_RELEASED;
+        }
+    } else if (state.buttonState == BTN_RELEASED || state.buttonState == BTN_LONG_RELEASED) {
+        state.buttonState = BTN_IDLE;
+    }
+}
+
+void updateLights(struct State &state, struct Lights &lights) {
+    if (state.buttonState == BTN_RELEASED) {
+        state.lightState = (state.lightState + 1) % STATES;
+        
+        // init
+        if (state.lightState == 0) {
+            if (state.color == CLR_BLUE) {
+                lights.setColor(0, CLR_B_0_0);
+                lights.setColor(1, CLR_B_0_1);
+            }
+        } else if (state.lightState == 1) {
+            if (state.color == CLR_BLUE) {
+                lights.setColor(0, CLR_B_1_0);
+                lights.setColor(1, CLR_B_1_1);
+            }
+        } else if (state.lightState == 2) {
+            if (state.color == CLR_BLUE) {
+                lights.setColor(0, CLR_B_2_0);
+                lights.setColor(1, CLR_B_2_1);
+            }
+        } else if (state.lightState == 3) {
+            if (state.color == CLR_BLUE) {
+                lights.setColor(0, CLR_B_3_0);
+                lights.setColor(1, CLR_B_3_1);
+            }
+        }
+
+        writeLights(lights);
+    }
 }
 
 void setup() {
-    setupLights(lights);
+    pinMode(LED_PIN, OUTPUT);
+    pinMode(BTN_PIN, INPUT);
     pinMode(3, OUTPUT);
+
+    lights.setColor(0, 0x00, 0x00, 0x00);
+    lights.setColor(1, 0x00, 0x0F, 0x00);
 }
 
-bool state = false;
+//bool b = false;
 void loop() {
-    writeLights(lights);
-    delay(1000);
-    state = !state;
-    digitalWrite(3, state ? HIGH : LOW);
+    updateButton(state);
+    updateLights(state, lights);
+    delay(10);
+//    b = !b;
+//
+//    if (b) {
+//        lights.setColor(0, 0xFF, 0x00, 0x00);
+//        lights.setColor(1, 0x00, 0xFF, 0x00);
+//    } else {
+//        lights.setColor(1, 0xFF, 0x00, 0x00);
+//        lights.setColor(0, 0x00, 0xFF, 0x00);
+//    }
 }
