@@ -6,13 +6,17 @@
 #define BTN_IDLE 0
 #define BTN_JUST_PRESSED 1
 #define BTN_PRESSED 2
-#define BTN_LONG_PRESSED 3
-#define BTN_RELEASED 4
-#define BTN_LONG_RELEASED 5
+#define BTN_JUST_LONG_PRESSED 3
+#define BTN_LONG_PRESSED 4
+#define BTN_RELEASED 5
+#define BTN_LONG_RELEASED 6
 #define BTN_LONG_TICKS 50
 
 #define STATES 4
 #define COLORS 2
+
+#define CLR_BLUE 0
+#define CLR_RED 1
 
 // 0.125 us +- 0.15
 // 0.25
@@ -28,28 +32,27 @@
 // T1H 0.8us
 // T1L 0.45us
 
+// COLOR_STATE_INDEX
+#define CLR_B_0_0 0x00, 0x00, 0x00
+#define CLR_B_0_1 0x00, 0x00, 0x00
+#define CLR_B_1_0 0x00, 0x7F, 0x7F
+#define CLR_B_1_1 0x00, 0x00, 0x00
+#define CLR_B_2_0 0x00, 0x7F, 0x7F
+#define CLR_B_2_1 0x00, 0x7F, 0x7F
+#define CLR_B_3_0 0x00, 0xFF, 0xFF
+#define CLR_B_3_1 0x00, 0xFF, 0xFF
 
-static const uint8_t COLOR[3 * STATES * LED_PATTERN_SIZE] {
-    // stored as RGB
-
-    // blue
-    0x00, 0x00, 0x00, // state 0
-    0x00, 0x00, 0x00,
-
-    0x00, 0x7F, 0x7F, // state 1
-    0x00, 0x00, 0x00,
-
-    0x00, 0x7F, 0x7F, // state 2
-    0x00, 0x7F, 0x7F,
-
-    0x00, 0xFF, 0xFF, // state 3
-    0x00, 0xFF, 0xFF,
-};
-
+// Red
+#define CLR_R_0_0 0x00, 0x00, 0x00
+#define CLR_R_0_1 0x00, 0x00, 0x00
+#define CLR_R_1_0 0x7F, 0x10, 0x10
+#define CLR_R_1_1 0x00, 0x00, 0x00
+#define CLR_R_2_0 0x7F, 0x10, 0x10
+#define CLR_R_2_1 0x7F, 0x10, 0x10
+#define CLR_R_3_0 0xFF, 0x20, 0x20
+#define CLR_R_3_1 0xFF, 0x20, 0x20
 
 struct Lights {
-    uint8_t count = 1;
-    
     uint8_t colors[3 * LED_PATTERN_SIZE];
 
     void setColor(uint8_t index, uint8_t red, uint8_t green, uint8_t blue) {
@@ -61,7 +64,7 @@ struct Lights {
 } lights;
 
 struct State {
-    uint8_t colorState = 0;
+    uint8_t colorState = CLR_BLUE;
     int8_t lightState = -1;
     uint8_t buttonState = BTN_PRESSED; // for init
 
@@ -225,22 +228,58 @@ void updateButton(struct State &state) {
     }
 }
 
+inline void set(uint8_t *colors, uint8_t r, uint8_t g, uint8_t b) {
+    *(colors) = r;
+    *(colors+1) = g;
+    *(colors+2) = b;
+}
+
 void updateLights(struct State &state, struct Lights &lights) {
+    bool dirty = false;
     if (state.buttonState == BTN_LONG_PRESSED) {
         state.colorState = (state.colorState + 1) % COLORS;
+        dirty = true;
         
     } else if (state.buttonState == BTN_RELEASED) {
         state.lightState = (state.lightState + 1) % STATES;
+        dirty = true;
+    }
 
-        const uint8_t *color = 
-            COLOR +                                             // base addr
-            state.colorState * 3 * STATES * LED_PATTERN_SIZE +  // color offset
-            3 * state.lightState * LED_PATTERN_SIZE;            // state offset
-
-        for (int i = 0; i < LED_PATTERN_SIZE; i++) {
-            lights.setColor(i, *(color + 3*i), *(color + 3*i + 1), *(color + 3*i + 2));
+    if (dirty) {
+        uint8_t colors[3 * LED_PATTERN_SIZE];
+        if (state.colorState == CLR_BLUE) {
+            if (state.lightState == 0) {
+                set(colors, CLR_B_0_0);
+                set(colors+3, CLR_B_0_1);
+            } else if (state.lightState == 1) {
+                set(colors, CLR_B_1_0);
+                set(colors+3, CLR_B_1_1);
+            } else if (state.lightState == 2) {
+                set(colors, CLR_B_2_0);
+                set(colors+3, CLR_B_2_1);
+            } else if (state.lightState == 3) {
+                set(colors, CLR_B_3_0);
+                set(colors+3, CLR_B_3_1);
+            }
+        } else if (state.colorState == CLR_RED) {
+            if (state.lightState == 0) {
+                set(colors, CLR_R_0_0);
+                set(colors+3, CLR_R_0_1);
+            } else if (state.lightState == 1) {
+                set(colors, CLR_R_1_0);
+                set(colors+3, CLR_R_1_1);
+            } else if (state.lightState == 2) {
+                set(colors, CLR_R_2_0);
+                set(colors+3, CLR_R_2_1);
+            } else if (state.lightState == 3) {
+                set(colors, CLR_R_3_0);
+                set(colors+3, CLR_R_3_1);
+            }
         }
 
+        for (uint8_t i = 0; i < LED_PATTERN_SIZE; i++) {
+            lights.setColor(i, colors[3*i], colors[3*i+1], colors[3*i+2]);
+        }
         writeLights(lights);
     }
 }
