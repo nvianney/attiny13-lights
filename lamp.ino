@@ -95,7 +95,7 @@ void writeLights(struct Lights &lights) {
     volatile uint8_t ledCount = LED_COUNT / LED_PATTERN_SIZE;
     volatile uint8_t zero = 0;
 
-    for (int i = 0; i < LED_PATTERN_SIZE * 3; i++) {
+    for (int i = 0; i < LED_PATTERN_SIZE * 3; i++) { // TODO: eliminate for-loop
         colorCount <<= 1;
         colorCount |= 0x01;
     }
@@ -257,7 +257,6 @@ bool updateLights(struct State &state, struct Lights &lights) {
 
     if (dirty) {
         uint8_t colors[3 * LED_PATTERN_SIZE];
-        // to optimize: avoid using set(...).
         if (state.colorState == CLR_BLUE) {
             if (state.lightState == 0) {
                 set(colors, CLR_B_0_0);
@@ -288,7 +287,7 @@ bool updateLights(struct State &state, struct Lights &lights) {
             }
         }
 
-        for (uint8_t i = 0; i < LED_PATTERN_SIZE; i++) {
+        for (uint8_t i = 0; i < LED_PATTERN_SIZE; i++) { // TODO: eliminate for-loop
             lights.setColor(i, colors[3*i], colors[3*i+1], colors[3*i+2]);
         }
         writeLights(lights);
