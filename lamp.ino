@@ -19,11 +19,13 @@
 #define STATES 4
 #define COLORS 3
 
-#define BRIGHTNESS_SPEED 1
+#define BRIGHTNESS_SPEED 4
 
 // Vcc = 1.1 * 1023 / ADC => ADC = 1.1 * 1023 / Vcc
-#define MAX_VOLTAGE_ADC 256 // Vcc = 4.4
-#define MIN_VOLTAGE_ADC 234 // Vcc = 4.8
+//#define MAX_VOLTAGE_ADC 256 // Vcc = 4.4
+//#define MIN_VOLTAGE_ADC 234 // Vcc = 4.8
+#define MAX_VOLTAGE_ADC 350 // Vcc = 3.2
+#define MIN_VOLTAGE_ADC 330 // Vcc = 3.1
 // #define VOLTAGE_INC 10
 
 // 0.125 us +- 0.15
@@ -53,7 +55,7 @@
 #include <avr/sleep.h>
 
 struct Lights {
-    uint16_t count;
+    uint16_t count = LED_COUNT;
     uint8_t colors[3 * LED_PATTERN_SIZE];
 
     void setColor(uint8_t index, uint8_t red, uint8_t green, uint8_t blue) {
@@ -68,9 +70,9 @@ struct State {
     int8_t lightState = -1;
     uint8_t buttonState = BTN_PRESSED; // for init
     uint8_t buttonTicks = 0;
-    
-    uint16_t brightness = 0;
+
     int8_t brightnessDirection = BRIGHTNESS_SPEED;
+    uint16_t brightness = 127;
   
 } state;
 
@@ -257,6 +259,8 @@ inline void set(uint8_t *colors, uint8_t r, uint8_t g, uint8_t b) {
 bool updateLights(struct State &state, struct Lights &lights) {
     bool dirty = false;
     if (state.buttonState == BTN_JUST_LONG_PRESSED) {
+        // previously, we handle battery level here. to save .text space, we moved it to BTN_LONG_PRESS
+    } else if (state.buttonState == BTN_LONG_PRESSED) {
         if (state.lightState == 0) {
             // const uint32_t delta = MAX_VOLTAGE_ADC - MIN_VOLTAGE_ADC;
             // dv = 0.0 -> ADC = 0
@@ -267,16 +271,23 @@ bool updateLights(struct State &state, struct Lights &lights) {
             for (uint8_t i = 0; i < LED_PATTERN_SIZE; i++) {
                 lights.setColor(i, 0x00, 0xFF, 0x00);
             }
-            lights.count = value >> 1;
-            
+            lights.count = value >> 7;
+            writeLights(lights);
         } else {
             dirty = true;
-            int16_t output = (int16_t) state.brightness + state.brightnessDirection;
-            state.brightness = output < 0 ? 0x00 : output > 0xFF ? 0xFF : 0x00;
+            int16_t output = state.brightness + state.brightnessDirection;
+            if (output < 0x01) {
+                state.brightness = 0x01;
+            } else if (output > 0xFF) {
+                state.brightness = 0xFF;
+            } else {
+                state.brightness = output;
+            }
         }
 
     } else if (state.buttonState == BTN_LONG_RELEASED) {
         if (state.lightState == 0) {
+            dirty = true;
             lights.count = LED_COUNT;
         } else {
             state.brightnessDirection = -state.brightnessDirection;
@@ -344,6 +355,6 @@ void loop() {
     _delay_ms(10);
 
     if (state.buttonState == BTN_IDLE && canSleep) {
-        sleep();
+//        sleep();
     }
 }
