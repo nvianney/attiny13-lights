@@ -4,7 +4,7 @@
 
 #define BTN_INTERRUPT PCINT1
 
-#define LED_PATTERN_SIZE 2
+#define LED_PATTERN_SIZE 1
 #define LED_COUNT 4
 
 #define BTN_IDLE 0
@@ -17,7 +17,14 @@
 #define BTN_LONG_TICKS 50
 
 #define STATES 4
-#define COLORS 2
+#define COLORS 3
+
+#define BRIGHTNESS_SPEED 1
+
+// Vcc = 1.1 * 1023 / ADC => ADC = 1.1 * 1023 / Vcc
+#define MAX_VOLTAGE_ADC 256 // Vcc = 4.4
+#define MIN_VOLTAGE_ADC 234 // Vcc = 4.8
+// #define VOLTAGE_INC 10
 
 // 0.125 us +- 0.15
 // 0.25
@@ -33,27 +40,9 @@
 // T1H 0.8us
 // T1L 0.45us
 
-#define CLR_BLUE 0
-#define CLR_RED 1
-// COLOR_STATE_INDEX
-#define CLR_B_0_0 0x00, 0x00, 0x00
-#define CLR_B_0_1 0x00, 0x00, 0x00
-#define CLR_B_1_0 0x00, 0x7F, 0x7F
-#define CLR_B_1_1 0x00, 0x00, 0x00
-#define CLR_B_2_0 0x00, 0x7F, 0x7F
-#define CLR_B_2_1 0x00, 0x7F, 0x7F
-#define CLR_B_3_0 0x00, 0xFF, 0xFF
-#define CLR_B_3_1 0x00, 0xFF, 0xFF
-
-// Red
-#define CLR_R_0_0 0x00, 0x00, 0x00
-#define CLR_R_0_1 0x00, 0x00, 0x00
-#define CLR_R_1_0 0x7F, 0x10, 0x10
-#define CLR_R_1_1 0x00, 0x00, 0x00
-#define CLR_R_2_0 0x7F, 0x10, 0x10
-#define CLR_R_2_1 0x7F, 0x10, 0x10
-#define CLR_R_3_0 0xFF, 0x20, 0x20
-#define CLR_R_3_1 0xFF, 0x20, 0x20
+#define CLR_B 0x00, 0xFF, 0xFF
+#define CLR_R 0xFF, 0x20, 0x20
+#define CLR_A 0xFF, 0xFF, 0x00
 
 // using this macro still results in the same no. of bytes used.
 //#define SET_COLOR(ptr, r, g, b) \
@@ -64,6 +53,7 @@
 #include <avr/sleep.h>
 
 struct Lights {
+    uint16_t count;
     uint8_t colors[3 * LED_PATTERN_SIZE];
 
     void setColor(uint8_t index, uint8_t red, uint8_t green, uint8_t blue) {
@@ -75,11 +65,12 @@ struct Lights {
 } lights;
 
 struct State {
-    uint8_t colorState = CLR_BLUE;
     int8_t lightState = -1;
     uint8_t buttonState = BTN_PRESSED; // for init
-
     uint8_t buttonTicks = 0;
+    
+    uint16_t brightness = 0;
+    int8_t brightnessDirection = BRIGHTNESS_SPEED;
   
 } state;
 
@@ -90,30 +81,30 @@ void writeLights(struct Lights &lights) {
     volatile uint8_t *start = ((uint8_t*) lights.colors);
     volatile uint8_t data = *start;
     volatile uint8_t next = (data & 0x80) ? hi : lo;
-    volatile uint8_t colorIndex;
-    volatile uint8_t colorCount = 0x00;
-    volatile uint8_t ledCount = LED_COUNT / LED_PATTERN_SIZE;
+    volatile uint8_t colorIndex = 0b111; // adjust this depending on # of unique colors. pattern=1: 0b111. pattern=2: 0b111111
+    volatile uint8_t colorCount = colorIndex;
+    volatile uint8_t ledCount = lights.count / LED_PATTERN_SIZE;
     volatile uint8_t zero = 0;
 
-    for (int i = 0; i < LED_PATTERN_SIZE * 3; i++) { // TODO: eliminate for-loop
-        colorCount <<= 1;
-        colorCount |= 0x01;
-    }
-    colorIndex = colorCount;
+    // for (int i = 0; i < LED_PATTERN_SIZE * 3; i++) { // TODO: eliminate for-loop
+    //     colorCount <<= 1;
+    //     colorCount |= 0x01;
+    // }
+    // colorIndex = colorCount;
     
     asm volatile(
         "top: \n\t"
         
-        "out %[port], %[hi] \n\t"   // 1    port = HI
-        "rjmp .+0 \n\t"             //      nop nop
-        "out %[port], %[next] \n\t" // 1    port = next
-        "mov %[next], %[lo] \n\t"   // 1    next = LO
-        "sbrc %[data], 6 \n\t"      // 1/2  if data & 0x40
-        "mov %[next], %[hi] \n\t"   // 1    next = HI
-        "nop \n\t"                  // 1    nop
-        "out %[port], %[lo] \n\t"   // 1    port = LO
-        "rjmp .+0 \n\t"             // 2    nop nop
-        "nop \n\t"                  // 1    nop
+        "out %[port], %[hi] \n\t"   // 1    port = HI       0
+        "rjmp .+0 \n\t"             //      nop nop         0.125 0.250
+        "out %[port], %[next] \n\t" // 1    port = next     0.375
+        "mov %[next], %[lo] \n\t"   // 1    next = LO       0.500
+        "sbrc %[data], 6 \n\t"      // 1/2  if data & 0x40  0.625
+        "mov %[next], %[hi] \n\t"   // 1    next = HI       0.750
+        "nop \n\t"                  // 1    nop             0.875
+        "out %[port], %[lo] \n\t"   // 1    port = LO       1.000
+        "rjmp .+0 \n\t"             // 2    nop nop         1.125
+        "nop \n\t"                  // 1    nop             1.125
 
         "out %[port], %[hi] \n\t"   // 1    port = HI
         "rjmp .+0 \n\t"             //      nop nop
@@ -238,6 +229,25 @@ void updateButton(struct State &state) {
     }
 }
 
+uint32_t vcr() {
+    // https://provideyourown.com/2012/secret-arduino-voltmeter-measure-battery-voltage/
+    ADMUX = _BV(REFS0);
+
+    _delay_ms(2); // Wait for Vref to settle
+    ADCSRA |= _BV(ADSC); // Start conversion
+    while (bit_is_set(ADCSRA, ADSC)); // measuring
+
+    uint32_t low  = ADCL; // must read ADCL first - it then locks ADCH  
+    uint32_t high = ADCH; // unlocks both
+
+    uint32_t result = (high<<8) | low;
+
+    // result = 1125300L / result; // Calculate Vcc (in mV); 1125300 = 1.1*1023*1000
+    // return result; // Vcc in millivolts  
+
+    return result; // ADC = 1.1 * 1023 / Vcc
+}
+
 inline void set(uint8_t *colors, uint8_t r, uint8_t g, uint8_t b) {
     *(colors) = r;
     *(colors+1) = g;
@@ -247,51 +257,57 @@ inline void set(uint8_t *colors, uint8_t r, uint8_t g, uint8_t b) {
 bool updateLights(struct State &state, struct Lights &lights) {
     bool dirty = false;
     if (state.buttonState == BTN_JUST_LONG_PRESSED) {
-        state.colorState = (state.colorState + 1) % COLORS;
-        dirty = true;
-        
+        if (state.lightState == 0) {
+            // const uint32_t delta = MAX_VOLTAGE_ADC - MIN_VOLTAGE_ADC;
+            // dv = 0.0 -> ADC = 0
+            // dv = 0.4 -> ADC = 22
+            uint32_t value = MAX_VOLTAGE_ADC - (vcr() - MIN_VOLTAGE_ADC); // Vcc - Vref ADC
+            
+            // delta is 256-234 = 22. may need to double value.
+            for (uint8_t i = 0; i < LED_PATTERN_SIZE; i++) {
+                lights.setColor(i, 0x00, 0xFF, 0x00);
+            }
+            lights.count = value >> 1;
+            
+        } else {
+            dirty = true;
+            int16_t output = (int16_t) state.brightness + state.brightnessDirection;
+            state.brightness = output < 0 ? 0x00 : output > 0xFF ? 0xFF : 0x00;
+        }
+
+    } else if (state.buttonState == BTN_LONG_RELEASED) {
+        if (state.lightState == 0) {
+            lights.count = LED_COUNT;
+        } else {
+            state.brightnessDirection = -state.brightnessDirection;
+        }
+
     } else if (state.buttonState == BTN_RELEASED) {
-        state.lightState = (state.lightState + 1) % STATES;
+        state.lightState++;
+        if (state.lightState >= STATES) state.lightState = 0;
         dirty = true;
     }
 
-    if (dirty) {
-        uint8_t colors[3 * LED_PATTERN_SIZE];
-        if (state.colorState == CLR_BLUE) {
-            if (state.lightState == 0) {
-                set(colors, CLR_B_0_0);
-                set(colors+3, CLR_B_0_1);
-            } else if (state.lightState == 1) {
-                set(colors, CLR_B_1_0);
-                set(colors+3, CLR_B_1_1);
-            } else if (state.lightState == 2) {
-                set(colors, CLR_B_2_0);
-                set(colors+3, CLR_B_2_1);
-            } else if (state.lightState == 3) {
-                set(colors, CLR_B_3_0);
-                set(colors+3, CLR_B_3_1);
-            }
-        } else if (state.colorState == CLR_RED) {
-            if (state.lightState == 0) {
-                set(colors, CLR_R_0_0);
-                set(colors+3, CLR_R_0_1);
-            } else if (state.lightState == 1) {
-                set(colors, CLR_R_1_0);
-                set(colors+3, CLR_R_1_1);
-            } else if (state.lightState == 2) {
-                set(colors, CLR_R_2_0);
-                set(colors+3, CLR_R_2_1);
-            } else if (state.lightState == 3) {
-                set(colors, CLR_R_3_0);
-                set(colors+3, CLR_R_3_1);
-            }
-        }
+    if (!dirty) return true;
 
-        for (uint8_t i = 0; i < LED_PATTERN_SIZE; i++) { // TODO: eliminate for-loop
-            lights.setColor(i, colors[3*i], colors[3*i+1], colors[3*i+2]);
-        }
-        writeLights(lights);
+    uint8_t colors[3];
+    if (state.lightState == 0) {
+        set(colors, 0x00, 0x00, 0x00);
+    } else if (state.lightState == 1) {
+        set(colors, CLR_B);
+    } else if (state.lightState == 2) {
+        set(colors, CLR_R);
+    } else if (state.lightState == 3) {
+        set(colors, CLR_A);
     }
+
+    uint8_t red = ((uint16_t) colors[0]) * state.brightness / 0xFF;
+    uint8_t green = ((uint16_t) colors[1]) * state.brightness / 0xFF;
+    uint8_t blue = ((uint16_t) colors[2]) * state.brightness / 0xFF;
+    for (uint8_t i = 0; i < LED_PATTERN_SIZE; i++) {
+        lights.setColor(i, red, green, blue);
+    }
+    writeLights(lights);
 
     return true;
 }
