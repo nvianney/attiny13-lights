@@ -1,3 +1,5 @@
+#define DELAY_MS 50
+
 #define LED_MOSFET_PIN PB0
 #define BTN_PIN PB1
 #define LED_PIN PB2
@@ -14,7 +16,7 @@
 #define BTN_LONG_PRESSED 4
 #define BTN_RELEASED 5
 #define BTN_LONG_RELEASED 6
-#define BTN_LONG_TICKS 50
+#define BTN_LONG_DURATION 500
 
 #define STATES 5 // main states accessible by button release
 #define STATE_OFF 0
@@ -23,24 +25,27 @@
 #define STATE_A 3
 #define STATE_G 4 // gradient
 // substate
-#define STATE_BR 5 // brightness
+#define STATE_BR -1 // brightness
 
-#define B_STATE_INC 0
-#define B_STATE_WAIT_INC 1
-#define B_STATE_WAIT_DEC 2
-#define B_STATE_DEC 3
-#define B_STATE_WAIT_DURATION 30
+#define BR_STATE_INC 0
+#define BR_STATE_WAIT_INC 1
+#define BR_STATE_WAIT_DEC 2
+#define BR_STATE_DEC 3
+#define BR_STATE_WAIT_DURATION 2000
 
-#define BR_STATE_SPEED 4
+#define BR_STATE_SPEED 2
 
-#define G_STATE_SPEED 3
-
+#define G_STATE_SPEED 1
+#define G_SIZE 4        // no. of unique colors
+#define G_STATE_WAIT_DURATION 500
 
 // Vcc = 1.1 * 1023 / ADC => ADC = 1.1 * 1023 / Vcc
 #define BATT_MIN_VOLTS 4400 // Vcc = 4.4
 #define BATT_MAX_VOLTS 4800 // Vcc = 4.8
 #define BATT_IND_MAX 10 // batt indicator max
 #define BATT_IND_CLAMP_MIN 2
+
+#define WRAP_0(X, MAX) if (X >= MAX) X = 0;
 
 // 0.125 us +- 0.15
 // 0.25
@@ -58,11 +63,19 @@
 
 #define CLR_B 0x00, 0xFF, 0xFF
 #define CLR_R 0xFF, 0x20, 0x20
-#define CLR_A 0xFF, 0x80, 0x00
+#define CLR_A 0xFF, 0x20, 0x00
 #define CLR_BATT_LO 0xA, 0x50, 0x00
 #define CLR_BATT_HI 0x00, 0x70, 0x00
 
+#include <util/delay.h>
 #include <avr/sleep.h>
+
+const uint8_t GRADIENTS[G_SIZE * 3] = { // stride of 3
+    CLR_B,
+    CLR_R,
+    0x20, 0xFF, 0x40,
+    CLR_A
+};
 
 struct Lights {
     uint16_t count = LED_COUNT;
@@ -77,17 +90,18 @@ struct Lights {
 } lights;
 
 struct State {
-    int8_t lightState = -1;
+    int8_t lightState = 0;
 
-    uint8_t buttonState = BTN_PRESSED;  // BTN_PRESSED for init
+    int8_t gradientState = 1;           // -x: wait at color x. x: transition from x to x+1. 0 is undefined
+    uint8_t gradientTick = 0;
+
+    uint8_t buttonState = BTN_IDLE;     //
     uint8_t buttonTicks = 0;            // for long-press
 
     uint8_t brightnessPrevState = 0;    // state prior to entering brightness
     uint8_t brightnessState = 0;        // indicates increasing/decreasing/waiting brightness
     uint8_t brightnessTicks = 0;        // to determine wait time for brightness
-    uint16_t brightness = 127;
-
-    uint8_t gradientTick = 0;
+    int16_t brightness = 127;           // signed, because during intermediate calculations it might be less than 0. max is 255
   
 } state;
 
@@ -122,7 +136,7 @@ void writeLights(struct Lights &lights) {
         "out %[port], %[next] \n\t" // 1    port = next     0.375
         "mov %[next], %[lo] \n\t"   // 1    next = LO       0.500
         "sbrc %[data], 6 \n\t"      // 1/2  if data & 0x40  0.625
-        "mov %[next], %[hi] \n\t"   // 1    next = HI       0.750
+        "mov %[next], %[hi] \n\t"   // 1      next = HI     0.750
         "out %[port], %[lo] \n\t"   // 1    port = LO       0.875
         "nop \n\t"                  // 1    nop             1.000
         "rjmp .+0 \n\t"             // 2    nop nop         1.125 1.250
@@ -132,7 +146,7 @@ void writeLights(struct Lights &lights) {
         "out %[port], %[next] \n\t" // 1    port = next     0.375
         "mov %[next], %[lo] \n\t"   // 1    next = LO       0.500
         "sbrc %[data], 5 \n\t"      // 1/2  if data & 0x20  0.625
-        "mov %[next], %[hi] \n\t"   // 1    next = HI       0.750
+        "mov %[next], %[hi] \n\t"   // 1      next = HI     0.750
         "out %[port], %[lo] \n\t"   // 1    port = LO       0.875
         "nop \n\t"                  // 1    nop             1.000
         "rjmp .+0 \n\t"             // 2    nop nop         1.125 1.250
@@ -142,7 +156,7 @@ void writeLights(struct Lights &lights) {
         "out %[port], %[next] \n\t" // 1    port = next     0.375
         "mov %[next], %[lo] \n\t"   // 1    next = LO       0.500
         "sbrc %[data], 4 \n\t"      // 1/2  if data & 0x10  0.625
-        "mov %[next], %[hi] \n\t"   // 1    next = HI       0.750
+        "mov %[next], %[hi] \n\t"   // 1      next = HI     0.750
         "out %[port], %[lo] \n\t"   // 1    port = LO       0.875
         "nop \n\t"                  // 1    nop             1.000
         "rjmp .+0 \n\t"             // 2    nop nop         1.125 1.250
@@ -152,7 +166,7 @@ void writeLights(struct Lights &lights) {
         "out %[port], %[next] \n\t" // 1    port = next     0.375
         "mov %[next], %[lo] \n\t"   // 1    next = LO       0.500
         "sbrc %[data], 3 \n\t"      // 1/2  if data & 0x08  0.625
-        "mov %[next], %[hi] \n\t"   // 1    next = HI       0.750
+        "mov %[next], %[hi] \n\t"   // 1      next = HI     0.750
         "out %[port], %[lo] \n\t"   // 1    port = LO       0.875
         "nop \n\t"                  // 1    nop             1.000
         "rjmp .+0 \n\t"             // 2    nop nop         1.125 1.250
@@ -162,7 +176,7 @@ void writeLights(struct Lights &lights) {
         "out %[port], %[next] \n\t" // 1    port = next     0.375
         "mov %[next], %[lo] \n\t"   // 1    next = LO       0.500
         "sbrc %[data], 2 \n\t"      // 1/2  if data & 0x04  0.625
-        "mov %[next], %[hi] \n\t"   // 1    next = HI       0.750
+        "mov %[next], %[hi] \n\t"   // 1      next = HI     0.750
         "out %[port], %[lo] \n\t"   // 1    port = LO       0.875
         "nop \n\t"                  // 1    nop             1.000
         "rjmp .+0 \n\t"             // 2    nop nop         1.125 1.250
@@ -185,22 +199,21 @@ void writeLights(struct Lights &lights) {
         "out %[port], %[next] \n\t" // 1    port = next             0.375
         "sbrs %[ci], 0 \n\t"        // 1/2  if light == 0           0.500
         "mov %[ci], %[cc] \n\t"     // 1      light = colorCount    0.625        
-        "sbrs %[ci], 0 \n\t"        // 1/2  if light == 0           0.750
+        "nop \n\t"                  // 1                            0.750
         "out %[port], %[lo] \n\t"   // 1    port = LO               0.875
         "mov %[next], %[lo] \n\t"   // 1    next = LO               1.000
         "sbrc %[data], 0 \n\t"      // 1/2  if data & 0x01          1.125
         "mov %[next], %[hi] \n\t"   // 1      next = HI             1.250
 
         "out %[port], %[hi] \n\t"   // 1    port = HI       0
-        "ld %[data], %a[ptr]+ \n\t" // 2    data = *ptr++   0.125
-        "nop \n\t"                  // 1    nop             0.250
+        "ld %[data], %a[ptr]+ \n\t" // 2    data = *ptr++   0.125 0.250
         "out %[port], %[next] \n\t" // 1    port = next     0.375
         "mov %[next], %[lo] \n\t"   // 1    next = LO       0.500
         "sbrc %[data], 7 \n\t"      // 1/2  if data & 0x80  0.625
         "mov %[next], %[hi] \n\t"   // 1      next = HI     0.750
         "out %[port], %[lo] \n\t"   // 1    port = LO       0.875
         "cpse %[lc], %[zero] \n\t"  // 1/2  if count != 0   1.000
-        "rjmp top \n\t"             // 2    goto top        1.125 1.250
+        "rjmp top \n\t"             // 2      goto top      1.125 1.250
 
         : [next] "+r" (next),
           [ci] "+r" (colorIndex),
@@ -214,7 +227,7 @@ void writeLights(struct Lights &lights) {
           [start] "e" (start),
           [ptr] "e" (start+1)
     );
-    _delay_ms(20);
+//    _delay_ms(20);
 }
 
 void updateButton(struct State &state) {
@@ -229,7 +242,7 @@ void updateButton(struct State &state) {
         state.buttonTicks = 0;
     } else if (state.buttonState == BTN_PRESSED) {
         state.buttonTicks++;
-        if (state.buttonTicks >= BTN_LONG_TICKS) {
+        if (state.buttonTicks >= BTN_LONG_DURATION / DELAY_MS) {
             state.buttonState = BTN_JUST_LONG_PRESSED;
         }
         if (!pressed) {
@@ -269,6 +282,14 @@ inline void set(uint8_t *colors, uint8_t r, uint8_t g, uint8_t b) {
     *(colors+2) = b;
 }
 
+inline void led(bool b = true) {
+    if (b) {
+        PORTB |= (1 << PB0);
+    } else {
+        PORTB &= ~(1 << PB0);
+    }
+}
+
 /*
  * [0, 1, 2, 3] = [off, blue, red, amber]
  * 
@@ -279,6 +300,7 @@ inline void set(uint8_t *colors, uint8_t r, uint8_t g, uint8_t b) {
  */
 bool updateLights(struct State &state, struct Lights &lights) {
     bool dirty = false;
+    bool sleep = false;
 
     if (state.lightState == STATE_OFF) {
         if (state.buttonState == BTN_JUST_LONG_PRESSED) {
@@ -295,78 +317,138 @@ bool updateLights(struct State &state, struct Lights &lights) {
             lights.count = progress;
             writeLights(lights);
 
+            dirty = false;
+            sleep = false;
+
         } else if (state.buttonState == BTN_LONG_RELEASED) {
             dirty = true;
             lights.count = LED_COUNT;
 
-        } else if (state.buttonState == BTN_RELEASED) {
             dirty = true;
+            sleep = true;
+
+        } else if (state.buttonState == BTN_RELEASED) {
             state.lightState++;
+
+            dirty = true;
+            sleep = true;
         }
 
     } else if (state.lightState == STATE_BR) {
+        led(false);
         dirty = true;
+        sleep = false;
 
         if (state.buttonState == BTN_RELEASED) {
             state.lightState = state.brightnessPrevState;
 
         } else {
-            if (state.brightnessState == B_STATE_INC) {
+            if (state.brightnessState == BR_STATE_INC) {
                 state.brightness += BR_STATE_SPEED;
 
-            } else if (state.brightnessState == B_STATE_DEC) {
+            } else if (state.brightnessState == BR_STATE_DEC) {
                 state.brightness -= BR_STATE_SPEED;
 
             } else { // waiting
                 state.brightnessTicks += 1;
 
-                if (state.brightnessTicks >= B_STATE_WAIT_DURATION) {
-                    if (state.brightnessState == B_STATE_WAIT_INC) {
-                        state.brightnessState = B_STATE_INC;
-                    } else if (state.brightnessState == B_STATE_WAIT_DEC) {
-                        state.brightnessState = B_STATE_DEC;
+                if (state.brightnessTicks >= BR_STATE_WAIT_DURATION / DELAY_MS) {
+                    if (state.brightnessState == BR_STATE_WAIT_INC) {
+                        state.brightnessState = BR_STATE_INC;
+                    } else if (state.brightnessState == BR_STATE_WAIT_DEC) {
+                        state.brightnessState = BR_STATE_DEC;
                     }
                 }
             }
 
             if (state.brightness < 0x01) {
                 state.brightness = 0x01;
-                state.brightnessState = B_STATE_WAIT_INC;
+                state.brightnessState = BR_STATE_WAIT_INC;
                 state.brightnessTicks = 0;
             } else if (state.brightness > 0xFF) {
                 state.brightness = 0xFF;
-                state.brightnessState = B_STATE_WAIT_DEC;
+                state.brightnessState = BR_STATE_WAIT_DEC;
                 state.brightnessTicks = 0;
             }
         }
 
     } else { // STATE_[B|R|A|G]
         if (state.lightState == STATE_G) {
-            // animate color
-
+            dirty = true;
+            sleep = false;
+        } else {
+            sleep = true;
         }
 
         if (state.buttonState == BTN_JUST_LONG_PRESSED) {
+            dirty = false;
             state.brightnessPrevState = state.lightState;
             state.lightState = STATE_BR;
+            state.brightnessState = BR_STATE_INC;
+            state.brightness = 0x01;
 
         } else if (state.buttonState == BTN_RELEASED) {
+            dirty = true;
             state.lightState++;
         }
     }
 
-    if (state.lightState >= STATES) state.lightState = 0;
-    if (!dirty) return true;
+    WRAP_0(state.lightState, STATES);
+
+    if (!dirty) return sleep;
 
     uint8_t colors[3];
-    if (state.lightState == 0) {
+    if (state.lightState == STATE_OFF) {
         set(colors, 0x00, 0x00, 0x00);
-    } else if (state.lightState == 1) {
+    } else if (state.lightState == STATE_B) {
         set(colors, CLR_B);
-    } else if (state.lightState == 2) {
+    } else if (state.lightState == STATE_R) {
         set(colors, CLR_R);
-    } else if (state.lightState == 3) {
+    } else if (state.lightState == STATE_A) {
         set(colors, CLR_A);
+    } else if (state.lightState == STATE_G) {
+        state.gradientTick++;
+
+
+        if (state.gradientState > 0) {
+            if (state.gradientTick >= 100) {
+                state.gradientTick = 0;
+                state.gradientState++;
+    
+                if (state.gradientState >= G_SIZE+1) {
+                    state.gradientState = 1;
+                }
+
+                state.gradientState = -state.gradientState;
+            } else {
+                int8_t color = state.gradientState-1;
+        
+                int8_t next = color + 1;
+                WRAP_0(next, G_SIZE);
+        
+                uint8_t *first = GRADIENTS + (color) * 3;
+                uint8_t *second = GRADIENTS + (next) * 3;
+        
+                uint8_t red = first[0] + ((second[0] - first[0]) * state.gradientTick) / 100;
+                uint8_t green = first[1] + ((second[1] - first[1]) * state.gradientTick) / 100;
+                uint8_t blue = first[2] + ((second[2] - first[2]) * state.gradientTick) / 100;
+        
+                set(colors, red, green, blue);
+            }
+        } else if (state.gradientState < 0) {
+            if (state.gradientTick >= BR_STATE_WAIT_DURATION / DELAY_MS) {
+                state.gradientState = -state.gradientState;
+                state.gradientTick = 0;
+            } else {
+          
+                uint8_t *ptr = GRADIENTS + (-state.gradientState - 1) * 3;
+                uint8_t red = ptr[0];
+                uint8_t green = ptr[1];
+                uint8_t blue = ptr[2];
+    
+                set(colors, red, green, blue);
+            }
+        }
     }
 
     uint8_t red = ((uint16_t) colors[0]) * state.brightness / 0xFF;
@@ -377,12 +459,18 @@ bool updateLights(struct State &state, struct Lights &lights) {
     }
     writeLights(lights);
 
-    return true;
+    return sleep;
 }
 
 void setup() {
     // 1 is output
-    DDRB |= (1 << LED_PIN);
+    DDRB |= (1 << LED_PIN) | (1 << PB0);
+
+    _delay_ms(50);
+    for (uint8_t i = 0; i < LED_PATTERN_SIZE; i++) {
+        lights.setColor(i, 0x00, 0x00, 0x00);
+    }
+    writeLights(lights);
 }
 
 ISR(PCINT0_vect){}
@@ -409,7 +497,7 @@ void sleep() {
 void loop() {
     updateButton(state);
     bool canSleep = updateLights(state, lights);
-    _delay_ms(10);
+    _delay_ms(DELAY_MS);
 
     if (state.buttonState == BTN_IDLE && canSleep) {
         sleep();
