@@ -1,6 +1,6 @@
 #define LED_MOSFET_PIN PB0
-#define BTN_PIN PB1
-#define LED_PIN PB2
+#define BTN_PIN PB2
+#define LED_PIN PB4
 
 #define BTN_INTERRUPT PCINT1
 
